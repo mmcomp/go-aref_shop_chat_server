@@ -54,7 +54,13 @@ func (h *Hub) run() {
 				close(client.send)
 			}
 		case message := <-h.broadcast:
-			h.redisService.publish(h.laravelChannel, string(message.message))
+			tmpMessage := MessageStruct[ChatMessage]{
+				Error: "",
+			}
+			json.Unmarshal(message.message, &tmpMessage)
+			if tmpMessage.Type == Message {
+				h.redisService.publish(h.laravelChannel, string(message.message))
+			}
 			possibleMessage := ProcessMessage(message, &h.redisService, h.laravelPresenceChannel)
 			if possibleMessage != nil {
 				toSendMessage, _ := json.Marshal(possibleMessage)
