@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"strconv"
 )
 
@@ -75,9 +74,7 @@ func (h *Hub) run() {
 			}
 		case message := <-h.broadcast:
 			h.updateUserTokenData(message)
-			log.Println("New Message From Socket userId:", message.client.userId, " token:", message.client.token, " ip:", message.client.ip)
 			for client := range h.clients {
-				log.Println("Checking socket userId:", client.userId, " token:", client.token, " ip:", client.ip)
 				if client != message.client && client.token != "" && client.userId > 0 && client.token != message.client.token && client.userId == message.client.userId && client.ip != message.client.ip {
 					shouldDCError := MessageStruct[string]{
 						Type:  ErrorTokenInvalid,
