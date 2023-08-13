@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -46,6 +47,12 @@ type Client struct {
 	videoSessionId int64
 
 	allowMessage bool
+
+	token string
+
+	userId int64
+
+	ip string
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -128,7 +135,8 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), videoSessionId: 0, allowMessage: true}
+	remoteAddr := strings.Split(r.RemoteAddr, ":")
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), videoSessionId: 0, allowMessage: true, token: "", userId: 0, ip: remoteAddr[0]}
 	client.hub.register <- client
 
 	// Allow collection of memory referenced by the caller by doing all work in

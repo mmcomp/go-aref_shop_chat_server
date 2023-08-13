@@ -106,6 +106,8 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 			messagePayload.client.send <- msg
 			return nil
 		}
+		messagePayload.client.token = tmpMessageStruct.Token
+		messagePayload.client.userId = userId
 		isBlocked, blockedErr := IsUserBlocked(redisService, userId)
 		if blockedErr != nil {
 			log.Println("Check blocked error ", blockedErr)

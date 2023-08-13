@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"log"
+	"strconv"
 )
 
 // Hub maintains the set of active clients and broadcasts messages to the
@@ -43,6 +45,24 @@ func NewHub(redisService RedisService, laravelChannel string, laravelPresenceCha
 	}
 }
 
+func (h *Hub) updateUserTokenData(message MessagePayload) {
+	tmpMessage := MessageStruct[ChatMessage]{
+		Error: "",
+	}
+	json.Unmarshal(message.message, &tmpMessage)
+	token := tmpMessage.Token
+	message.client.token = token
+	users, err := h.redisService.GetUsers()
+	if err == nil {
+		idStr, ok := users[token]
+
+		id, convStr := strconv.ParseInt(idStr, 10, 64)
+		if ok && convStr == nil {
+			message.client.userId = id
+		}
+	}
+}
+
 func (h *Hub) run() {
 	for {
 		select {
@@ -54,6 +74,22 @@ func (h *Hub) run() {
 				close(client.send)
 			}
 		case message := <-h.broadcast:
+			h.updateUserTokenData(message)
+			log.Println("New Message From Socket userId:", message.client.userId, " token:", message.client.token, " ip:", message.client.ip)
+			for client := range h.clients {
+				log.Println("Checking socket userId:", client.userId, " token:", client.token, " ip:", client.ip)
+				if client != message.client && client.token != "" && client.userId > 0 && client.token != message.client.token && client.userId == message.client.userId && client.ip != message.client.ip {
+					shouldDCError := MessageStruct[string]{
+						Type:  ErrorTokenInvalid,
+						Token: client.token,
+						Data:  "socket_login_error",
+						Error: "socket_login_error",
+					}
+					shouldDCErrorStrByte, _ := json.Marshal(shouldDCError)
+					client.send <- shouldDCErrorStrByte
+				}
+			}
+
 			tmpMessage := MessageStruct[ChatMessage]{
 				Error: "",
 			}
