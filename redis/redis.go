@@ -1,4 +1,4 @@
-package main
+package redis
 
 import (
 	"context"
@@ -34,19 +34,9 @@ func (r *RedisService) Get(key string) (string, error) {
 	return val, err
 }
 
-func (r *RedisService) publish(channel string, payload string) error {
+func (r *RedisService) Publish(channel string, payload string) error {
 	return r.rdb.Publish(r.ctx, channel, payload).Err()
 }
-
-// func (r *RedisService) SubscribeChannel(channel string) {
-// 	pubSub := r.rdb.Subscribe(r.ctx, channel)
-// 	defer pubSub.Close()
-
-// 	// ch := pubSub.Channel()
-// 	// for msg := range ch {
-// 	// 	// fmt.Println(msg.Channel, msg.Payload)
-// 	// }
-// }
 
 func (r *RedisService) GetUsers() (map[string]string, error) {
 	keys, err := r.rdb.Keys(r.ctx, r.userHash+"user_*").Result()
@@ -113,10 +103,9 @@ func (r *RedisService) ReadMessages(videoSessionId int64) (map[string]string, er
 	return r.rdb.HGetAll(r.ctx, mainKey).Result()
 }
 
-func (r *RedisService) AddMessage(message MessageStruct[ChatMessageWithUser]) error {
-	mainKey := r.messageHash + "_" + strconv.FormatInt(message.Data.VideoSessionId, 10)
+func (r *RedisService) AddMessage(value []byte, videoSessionId int64) error {
+	mainKey := r.messageHash + "_" + strconv.FormatInt(videoSessionId, 10)
 	key := time.Now().UnixMilli()
-	value, _ := json.Marshal(message)
 	err := r.rdb.HSet(r.ctx, mainKey, key, value).Err()
 	if err != nil {
 		return err

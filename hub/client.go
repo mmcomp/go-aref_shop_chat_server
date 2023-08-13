@@ -1,4 +1,4 @@
-package main
+package hub
 
 import (
 	"bytes"
@@ -34,6 +34,11 @@ var upgrader = websocket.Upgrader{
 	WriteBufferSize: 1024,
 }
 
+type MessagePayload struct {
+	Message []byte
+	Client  *Client
+}
+
 // Client is a middleman between the websocket connection and the hub.
 type Client struct {
 	hub *Hub
@@ -44,15 +49,15 @@ type Client struct {
 	// Buffered channel of outbound messages.
 	send chan []byte
 
-	videoSessionId int64
+	VideoSessionId int64
 
-	allowMessage bool
+	AllowMessage bool
 
-	token string
+	Token string
 
-	userId int64
+	UserId int64
 
-	ip string
+	Ip string
 }
 
 // readPump pumps messages from the websocket connection to the hub.
@@ -77,7 +82,7 @@ func (c *Client) readPump() {
 			break
 		}
 		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		c.hub.broadcast <- MessagePayload{message: message, client: c}
+		c.hub.broadcast <- MessagePayload{Message: message, Client: c}
 	}
 }
 
@@ -128,7 +133,7 @@ func (c *Client) writePump() {
 }
 
 // serveWs handles websocket requests from the peer.
-func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
+func ServeWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -136,7 +141,7 @@ func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	remoteAddr := strings.Split(r.RemoteAddr, ":")
-	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), videoSessionId: 0, allowMessage: true, token: "", userId: 0, ip: remoteAddr[0]}
+	client := &Client{hub: hub, conn: conn, send: make(chan []byte, 256), VideoSessionId: 0, AllowMessage: true, Token: "", UserId: 0, Ip: remoteAddr[0]}
 	client.hub.register <- client
 
 	// Allow collection of memory referenced by the caller by doing all work in

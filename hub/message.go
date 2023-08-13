@@ -1,10 +1,12 @@
-package main
+package hub
 
 import (
 	"encoding/json"
 	"log"
 	"sort"
 	"strconv"
+
+	redisPkg "github.com/mmcomp/go-aref_shop_chat_server/redis"
 )
 
 type MessageType string
@@ -54,7 +56,7 @@ type MessageStruct[T MessageData] struct {
 	Error string
 }
 
-func CheckUserToken(redisService *RedisService, token string) (int64, bool, error) {
+func CheckUserToken(redisService *redisPkg.RedisService, token string) (int64, bool, error) {
 	users, err := redisService.GetUsers()
 	if err == nil {
 		idStr, ok := users[token]
@@ -66,7 +68,7 @@ func CheckUserToken(redisService *RedisService, token string) (int64, bool, erro
 	return 0, false, err
 }
 
-func IsUserBlocked(redisService *RedisService, userId int64) (bool, error) {
+func IsUserBlocked(redisService *redisPkg.RedisService, userId int64) (bool, error) {
 	blockedUsers, err := redisService.GetBlockedUserIds()
 	if err != nil {
 		return false, err
@@ -81,8 +83,75 @@ func IsUserBlocked(redisService *RedisService, userId int64) (bool, error) {
 	return false, nil
 }
 
-func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, laravelPresenceChannel string) *MessageStruct[ChatMessageWithUser] {
-	message := messagePayload.message
+func UpdateUserTokenData(redisService redisPkg.RedisService, message MessagePayload) {
+	tmpMessage := MessageStruct[ChatMessage]{
+		Error: "",
+	}
+	json.Unmarshal(message.Message, &tmpMessage)
+	token := tmpMessage.Token
+	message.Client.Token = token
+	users, err := redisService.GetUsers()
+	if err == nil {
+		idStr, ok := users[token]
+
+		id, convStr := strconv.ParseInt(idStr, 10, 64)
+		if ok && convStr == nil {
+			message.Client.UserId = id
+		}
+	}
+}
+
+func CheckReplicatedSockets(h *Hub, message MessagePayload) {
+	for client := range h.Clients {
+		if client != message.Client && client.Token != "" && client.UserId > 0 && client.Token != message.Client.Token && client.UserId == message.Client.UserId && client.Ip != message.Client.Ip {
+			shouldDCError := MessageStruct[string]{
+				Type:  ErrorTokenInvalid,
+				Token: client.Token,
+				Data:  "socket_login_error",
+				Error: "socket_login_error",
+			}
+			shouldDCErrorStrByte, _ := json.Marshal(shouldDCError)
+			client.send <- shouldDCErrorStrByte
+		}
+	}
+}
+
+func SendToLaravel(h *Hub, message MessagePayload) {
+	tmpMessage := MessageStruct[ChatMessage]{
+		Error: "",
+	}
+	json.Unmarshal(message.Message, &tmpMessage)
+	if tmpMessage.Type == Message {
+		h.RedisService.Publish(h.LaravelChannel, string(message.Message))
+	}
+}
+
+func Broadcast(h *Hub, message MessagePayload) {
+	possibleMessage := ProcessMessage(message, &h.RedisService, h.LaravelPresenceChannel)
+	if possibleMessage != nil {
+		toSendMessage, _ := json.Marshal(possibleMessage)
+		for client := range h.Clients {
+			if client.VideoSessionId == possibleMessage.Data.VideoSessionId && client.AllowMessage {
+				select {
+				case client.send <- toSendMessage:
+				default:
+					close(client.send)
+					delete(h.Clients, client)
+				}
+			}
+		}
+	}
+}
+
+func StartMessageProcess(h *Hub, messagePayload MessagePayload) {
+	UpdateUserTokenData(h.RedisService, messagePayload)
+	CheckReplicatedSockets(h, messagePayload)
+	SendToLaravel(h, messagePayload)
+	Broadcast(h, messagePayload)
+}
+
+func ProcessMessage(messagePayload MessagePayload, redisService *redisPkg.RedisService, laravelPresenceChannel string) *MessageStruct[ChatMessageWithUser] {
+	message := messagePayload.Message
 	if json.Valid(message) {
 		tmpMessageStruct := MessageStruct[string]{
 			Data:  "",
@@ -103,11 +172,11 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 				Token: tmpMessageStruct.Token,
 			}
 			msg, _ := json.Marshal(unauthorizedMessage)
-			messagePayload.client.send <- msg
+			messagePayload.Client.send <- msg
 			return nil
 		}
-		messagePayload.client.token = tmpMessageStruct.Token
-		messagePayload.client.userId = userId
+		messagePayload.Client.Token = tmpMessageStruct.Token
+		messagePayload.Client.UserId = userId
 		isBlocked, blockedErr := IsUserBlocked(redisService, userId)
 		if blockedErr != nil {
 			log.Println("Check blocked error ", blockedErr)
@@ -121,7 +190,7 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 				Token: tmpMessageStruct.Token,
 			}
 			msg, _ := json.Marshal(blockedMessage)
-			messagePayload.client.send <- msg
+			messagePayload.Client.send <- msg
 			return nil
 		}
 		userName, nameErr := redisService.GetUserName(userId)
@@ -131,14 +200,11 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 		}
 		switch tmpMessageStruct.Type {
 		case Message:
-			/*
-				{"Type":"MESSAGE","Token":"user_1_token","Data":{"msg":"Salam","video_session_id":1},"Error":""}
-			*/
 			messageStruct := MessageStruct[ChatMessage]{
 				Error: "",
 			}
 			json.Unmarshal(message, &messageStruct)
-			messagePayload.client.videoSessionId = messageStruct.Data.VideoSessionId
+			messagePayload.Client.VideoSessionId = messageStruct.Data.VideoSessionId
 			finalMessage := MessageStruct[ChatMessageWithUser]{
 				Type:  tmpMessageStruct.Type,
 				Token: tmpMessageStruct.Token,
@@ -150,25 +216,23 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 					Name:           userName,
 				},
 			}
-			addMessageErr := redisService.AddMessage(finalMessage)
+			finalMessageByte, _ := json.Marshal(finalMessage)
+			addMessageErr := redisService.AddMessage(finalMessageByte, messagePayload.Client.VideoSessionId)
 			if addMessageErr != nil {
 				log.Println("Add message error ", addMessageErr)
 				return nil
 			}
 			return &finalMessage
 		case StopMessage:
-			messagePayload.client.allowMessage = false
+			messagePayload.Client.AllowMessage = false
 		case StartMessage:
-			/*
-				{"Type":"START_MESSAGE","Token":"user_1_token","Data":{"video_session_id":1},"Error":""}
-			*/
 			messageStruct := MessageStruct[StartMessageStruct]{
 				Error: "",
 			}
 			json.Unmarshal(message, &messageStruct)
-			messagePayload.client.videoSessionId = messageStruct.Data.VideoSessionId
-			messagePayload.client.allowMessage = true
-			allMessages, err := redisService.ReadMessages(messagePayload.client.videoSessionId)
+			messagePayload.Client.VideoSessionId = messageStruct.Data.VideoSessionId
+			messagePayload.Client.AllowMessage = true
+			allMessages, err := redisService.ReadMessages(messagePayload.Client.VideoSessionId)
 			if err != nil {
 				log.Println("Read message error ", err)
 				return nil
@@ -188,13 +252,10 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 			}
 			data, _ := json.Marshal(allMessagesStruct)
 			resultMessage := `{"Type":"MESSAGE","Error":"","Token":"` + tmpMessageStruct.Token + `","Data":` + string(data) + `}`
-			messagePayload.client.send <- []byte(resultMessage)
+			messagePayload.Client.send <- []byte(resultMessage)
 			return nil
 		case Presence:
 		case FirstPresence:
-			/*
-				{"Type":"PRESENCE","Token":"user_1_token","Data":{"videoSessionId":1,"type":"online","users_id":1}}
-			*/
 			messageStruct := MessageStruct[Absence]{
 				Error: "",
 				Data: Absence{
@@ -207,12 +268,7 @@ func ProcessMessage(messagePayload MessagePayload, redisService *RedisService, l
 			}
 
 			msg, _ := json.Marshal(messageStruct.Data)
-			redisService.rdb.Publish(redisService.ctx, laravelPresenceChannel, string(msg))
-		default:
-			/*
-				{"Type":"HEART_BIT","Token":"token1","Data":"aaa","Error":""}
-			*/
-			// fmt.Println("Other Message ", tmpMessageStruct)
+			redisService.Publish(laravelPresenceChannel, string(msg))
 		}
 	}
 

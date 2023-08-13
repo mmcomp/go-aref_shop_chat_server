@@ -9,6 +9,8 @@ import (
 	"strconv"
 
 	"github.com/joho/godotenv"
+	hubPkg "github.com/mmcomp/go-aref_shop_chat_server/hub"
+	redisPkg "github.com/mmcomp/go-aref_shop_chat_server/redis"
 )
 
 func init() {
@@ -45,18 +47,18 @@ func main() {
 	ssl := os.Getenv("SSL")
 	test := os.Getenv("TEST")
 	var ctx = context.Background()
-	redisService := NewRedisService(ctx, redisAddr, nodeChannel, userHash, messageHash, messageCount, "", 0)
-	hub := NewHub(redisService, laravelChannel, laravelPresenceChannel)
-	go hub.run()
+	redisService := redisPkg.NewRedisService(ctx, redisAddr, nodeChannel, userHash, messageHash, messageCount, "", 0)
+	hub := hubPkg.NewHub(redisService, laravelChannel, laravelPresenceChannel)
+	go hub.Run()
 	if ssl == "no" {
 		if test == "yes" {
 			http.HandleFunc("/", serveHome)
 			http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-				serveWs(hub, w, r)
+				hubPkg.ServeWs(hub, w, r)
 			})
 		} else {
 			http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-				serveWs(hub, w, r)
+				hubPkg.ServeWs(hub, w, r)
 			})
 		}
 
@@ -77,7 +79,7 @@ func main() {
 	server := http.Server{
 		Addr: addr,
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			serveWs(hub, w, r)
+			hubPkg.ServeWs(hub, w, r)
 		}),
 		TLSConfig: tlsConfig,
 	}
