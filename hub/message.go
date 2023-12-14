@@ -180,7 +180,7 @@ func ProcessMessage(messagePayload MessagePayload, redisService *redisPkg.RedisS
 		isBlocked, blockedErr := IsUserBlocked(redisService, userId)
 		if blockedErr != nil {
 			log.Println("Check blocked error ", blockedErr)
-			return nil
+			// return nil
 		}
 		if isBlocked {
 			blockedMessage := MessageStruct[string]{
