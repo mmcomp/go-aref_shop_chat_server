@@ -67,7 +67,7 @@ func (r *RedisService) GetUsers() (map[string]string, error) {
 
 func (r *RedisService) GetBlockedUserIds() ([]int64, error) {
 	value, err := r.Get(r.userHash + "blocked_users")
-	if err != nil {
+	if err != nil && !errors.Is(err, redis.Nil) {
 		return []int64{}, err
 	}
 	var ids []int64

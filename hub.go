@@ -74,18 +74,18 @@ func (h *Hub) run() {
 			}
 		case message := <-h.broadcast:
 			h.updateUserTokenData(message)
-			// for client := range h.clients {
-			// 	if client != message.client && client.token != "" && client.userId > 0 && client.token != message.client.token && client.userId == message.client.userId && client.ip != message.client.ip {
-			// 		shouldDCError := MessageStruct[string]{
-			// 			Type:  ErrorTokenInvalid,
-			// 			Token: client.token,
-			// 			Data:  "socket_login_error",
-			// 			Error: "socket_login_error",
-			// 		}
-			// 		shouldDCErrorStrByte, _ := json.Marshal(shouldDCError)
-			// 		client.send <- shouldDCErrorStrByte
-			// 	}
-			// }
+			for client := range h.clients {
+				if client != message.client && client.token != "" && client.userId > 0 && client.token != message.client.token && client.userId == message.client.userId && client.ip != message.client.ip {
+					shouldDCError := MessageStruct[string]{
+						Type:  ErrorTokenInvalid,
+						Token: client.token,
+						Data:  "socket_login_error",
+						Error: "socket_login_error",
+					}
+					shouldDCErrorStrByte, _ := json.Marshal(shouldDCError)
+					client.send <- shouldDCErrorStrByte
+				}
+			}
 
 			tmpMessage := MessageStruct[ChatMessage]{
 				Error: "",
